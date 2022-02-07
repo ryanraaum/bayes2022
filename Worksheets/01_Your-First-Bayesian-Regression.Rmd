@@ -1,0 +1,90 @@
+---
+title: "Your First Bayesian Regression"
+author: "Ryan Raaum - Spring 2022"
+course: "Introduction to Bayesian Statistics"
+output:
+  rrmdstyle::html_worksheet: default
+  rrmdstyle::pdf_worksheet: default
+---
+
+## Let's get this started!
+
+This is our first worksheet of the class. If you've taken my Quantitative Methods class, you'll know the drill. But if you took my class before last fall, you've not seen the all-electronic version of my worksheets. And even for those who did take my class last fall, there are some changes as I've worked out some of the kinks.
+
+There's always going to be a `setup` code chunk at the start of the worksheet where you'll load the packages that are needed to complete the worksheet. I'll include some comments the first time or so that we use a package.
+
+```{r setup}
+library(qmdata) # my example datasets package
+library(here) # robust paths to files included in the project
+library(ggplot2) # plotting
+theme_set(theme_minimal()) # not necessary, I just don't like the default ggplot theme
+library(brms) # for Bayesian modeling
+```
+
+You will use a dataset with morphological measurements of seven-whorl land snails (*Cochlostoma septemspirale*) published by Baur and colleagues ([2012](https://doi.org/10.3897/zookeys.208.2869)) in an examination of sexual dimorphism in the species. Some of the measurements are illustrated below.
+
+<!--This will include an image showing some of the measurements in the knit HTML/PDF -->
+```{r landsnails-figure, echo=FALSE, out.width="30%"}
+knitr::include_graphics(here("images/landsnails.jpg"))
+```
+
+For the purposes of this worksheet, aperture height will be the response variable and aperture width will be the explanatory variable. 
+
+Looking at the help page for the `landsnails` dataset, what are the names of the aperture height and width variables? What are the units they are measured in? 
+
+> REPLACE THIS TEXT WITH YOUR ANSWER
+
+## Visualize the data
+
+Let's first look at a plot of aperture height against aperture width and verify that a linear model would be appropriate for these data.
+
+```{r plot-height-against-width}
+ggplot(landsnails, aes(x=aperture_w, y=aperture_h)) +
+  geom_point() +
+  labs(x="Aperture Width (µm)", y="Aperture Height (µm)")
+```
+
+That looks fine for linear regression modeling.
+
+## Ordinary linear regression
+
+Let's first acquaint ourselves with the data through an ordinary least squares linear regression using the base R `lm` function.
+
+```{r lm-regression}
+ols_mod <- lm(aperture_h ~ aperture_w, data=landsnails)
+summary(ols_mod)
+confint(ols_mod)
+```
+
+So, there's a statistically significant relationship with an $R^2$ of ~0.48.
+
+## Bayesian linear regression
+
+```{r brms-regression}
+brms_mod <- brm(aperture_h ~ aperture_w,
+                data=landsnails,
+                family=gaussian,
+                cores=4)
+brms_mod
+```
+
+```{r}
+landsnails_s <- landsnails %>% 
+  mutate(across(is.numeric, scale))
+brms_scaled <- brm(aperture_h ~ aperture_w,
+                data=landsnails_s,
+                family=gaussian,
+                cores=4)
+
+```
+
+
+```{r}
+landsnails_log <- landsnails %>% 
+  mutate(across(is.numeric, log))
+brms_log <- brm(aperture_h ~ aperture_w,
+                data=landsnails_log,
+                family=gaussian,
+                cores=4)
+
+```

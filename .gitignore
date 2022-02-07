@@ -1,0 +1,11 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+
+# Mac folder view configuration file
+.DS_Store
+
+# Generated files
+*.pdf
+*.html
