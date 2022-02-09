@@ -19,6 +19,7 @@ library(here) # robust paths to files included in the project
 library(ggplot2) # plotting
 theme_set(theme_minimal()) # not necessary, I just don't like the default ggplot theme
 library(brms) # for Bayesian modeling
+library(dplyr) # for data wrangling
 ```
 
 You will use a dataset with morphological measurements of seven-whorl land snails (*Cochlostoma septemspirale*) published by Baur and colleagues ([2012](https://doi.org/10.3897/zookeys.208.2869)) in an examination of sexual dimorphism in the species. Some of the measurements are illustrated below.
