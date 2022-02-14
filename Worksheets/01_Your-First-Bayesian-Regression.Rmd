@@ -13,79 +13,158 @@ This is our first worksheet of the class. If you've taken my Quantitative Method
 
 There's always going to be a `setup` code chunk at the start of the worksheet where you'll load the packages that are needed to complete the worksheet. I'll include some comments the first time or so that we use a package.
 
-```{r setup}
+```{r setup, message=FALSE}
 library(qmdata) # my example datasets package
 library(here) # robust paths to files included in the project
 library(ggplot2) # plotting
+library(patchwork) # for laying out plots
 theme_set(theme_minimal()) # not necessary, I just don't like the default ggplot theme
-library(brms) # for Bayesian modeling
+library(rstanarm) # for Bayesian modeling
+library(bayesplot) # for plotting of Bayesian models
+library(posterior) # manipulate the posterior distribution
 library(dplyr) # for data wrangling
 ```
 
-You will use a dataset with morphological measurements of seven-whorl land snails (*Cochlostoma septemspirale*) published by Baur and colleagues ([2012](https://doi.org/10.3897/zookeys.208.2869)) in an examination of sexual dimorphism in the species. Some of the measurements are illustrated below.
+You will use data from a study of the effects of ivory poaching on the length and circumference of tusks of African elephants in eastern Africa ([Chiyo et al. 2015](https://doi.org/10.1002/ece3.1769)). In addition to tusk `length` and `circumference`, the data include `time` period of collection (`1966-68` before widespread poaching and after during `2005-13`), `age`, `height` at shoulder, `sex`, and an individual `id`.
 
-<!--This will include an image showing some of the measurements in the knit HTML/PDF -->
-```{r landsnails-figure, echo=FALSE, out.width="30%"}
-knitr::include_graphics(here("images/landsnails.jpg"))
-```
-
-For the purposes of this worksheet, aperture height will be the response variable and aperture width will be the explanatory variable. 
-
-Looking at the help page for the `landsnails` dataset, what are the names of the aperture height and width variables? What are the units they are measured in? 
-
-> REPLACE THIS TEXT WITH YOUR ANSWER
+For the purposes of this worksheet, we will focus on tusk length (response variable) with height, time period, and sex as predictors. 
 
 ## Visualize the data
 
-Let's first look at a plot of aperture height against aperture width and verify that a linear model would be appropriate for these data.
+Let's first look at plots tusk length against height colored by sex/time period and verify that a linear model would be appropriate for these data.
 
-```{r plot-height-against-width}
-ggplot(landsnails, aes(x=aperture_w, y=aperture_h)) +
+```{r exploratory-plots, fig.width=7}
+p1 <- ggplot(tusksize, aes(length, height, color = sex)) +
   geom_point() +
-  labs(x="Aperture Width (µm)", y="Aperture Height (µm)")
+  labs(x = "Height (cm)", y = "Length (cm)")
+
+p2 <- ggplot(tusksize, aes(length, height, color = time)) +
+  geom_point() +
+  labs(x = "Height (cm)", y = "Length (cm)")
+
+p1 + p2
 ```
 
-That looks fine for linear regression modeling.
+That looks fine for linear regression modeling and there is an apparent difference between the sexes and time periods.
+
+## Some data pre-processing
+
+First, we'll log transform the numeric variables. If the data are all greater than zero, it can never really hurt and in this case it reduces the heteroscedasticity that you can see in the plots above.
+
+```{r some-log-transforms}
+tusksize <- tusksize %>% 
+  mutate(loglength = log(length),
+         logheight = log(height))
+```
+
+Next, following the lead of the paper, we'll center (but not scale) the height data. By doing this, the intercept becomes the predicted tusk length of an elephant of average height.
+
+```{r center-logheight}
+tusksize <- tusksize %>% 
+  mutate(logheight = scale(logheight, center = TRUE, scale = FALSE))
+```
 
 ## Ordinary linear regression
 
-Let's first acquaint ourselves with the data through an ordinary least squares linear regression using the base R `lm` function.
+Let's first acquaint ourselves with the data through an ordinary least squares linear regression using the base R `lm` function. To start with, we'll include the main terms as well as all the first order interactions. As I did in the slides in lecture, we'll create the formula outside of the modeling function so we can reuse it later.
 
 ```{r lm-regression}
-ols_mod <- lm(aperture_h ~ aperture_w, data=landsnails)
-summary(ols_mod)
-confint(ols_mod)
+tuskformula1 <- loglength ~ logheight + sex + time +
+  logheight:sex + logheight:time + sex:time
+fit1 <- lm(tuskformula1, data=tusksize)
+summary(fit1)
 ```
 
-So, there's a statistically significant relationship with an $R^2$ of ~0.48.
+So, there's a statistically significant relationship of tusk length with height with a predicted 2.5% increase in tusk length for every 1% increase in height. There are also significant interactions involving the time period. Overall, the model explains about 87% of the variation in tusk length.
 
 ## Bayesian linear regression
 
-```{r brms-regression}
-brms_mod <- brm(aperture_h ~ aperture_w,
-                data=landsnails,
-                family=gaussian,
-                cores=4)
-brms_mod
+First, let's create some common settings for the MCMC sampler. 4 chains is typical. For the number of cores, `parallel::detectCores()` will identify the number of cores available on your computer (which should definitely have several) and then we'll save one for other things. Finally, the seed can be anything, but it's generally good practice to have one for reproducibility.
+
+```{r sampler-setup}
+CHAINS = 4
+CORES = parallel::detectCores() - 1
+SEED = 1234
 ```
+
+Now we can fit a Bayesian regression model. We'll use the `stan_lm` function from `rstanarm` with a `R2` prior. In the function call below, replace `FIX` with a good starting value for the likely R-squared of the model. 
+
+```{r rstanarm-regression}
+fit2 <- stan_lm(tuskformula1,
+                data = tusksize,
+                #prior = R2(FIX, what="mean"),
+                prior = R2(0.87, what="mean"),
+                chains = CHAINS, cores = CORES, seed = SEED)
+```
+
+Hopefully that completed without any divergences on your computer (it did on mine). How would you look at a summary of the model?
 
 ```{r}
-landsnails_s <- landsnails %>% 
-  mutate(across(is.numeric, scale))
-brms_scaled <- brm(aperture_h ~ aperture_w,
-                data=landsnails_s,
-                family=gaussian,
-                cores=4)
-
+#
+summary(fit2)
 ```
 
+Here, the intercept is the expected (log) tusk length for a *female* elephant of average height during the *1966-68* time period. What is that expected length?
 
 ```{r}
-landsnails_log <- landsnails %>% 
-  mutate(across(is.numeric, log))
-brms_log <- brm(aperture_h ~ aperture_w,
-                data=landsnails_log,
-                family=gaussian,
-                cores=4)
-
+#exp(FIX)
+exp(4.5)
 ```
+
+But we're getting a little ahead of ourselves here. Let's first check some of the MCMC and model diagnostics.
+
+First, we can get an overview of some of the sampler diagnostics using the `check_hmc_diagnostics` function from `rstan`. 
+
+```{r hmc-diagnostics}
+rstan::check_hmc_diagnostics(fit2$stanfit)
+```
+
+We saw what divergences are in the lecture. 
+
+"Tree Depth" is part of the No-U-Turn-Sampler algorithm that relates to how efficiently the sampler is performing; if there were some iterations that hit the maximum tree depth it wouldn't be a big deal. But if there were a lot, the sampler isn't performing very efficiently.
+
+Finally, the "Energy" is another measure of how efficiently the sampler is working. Pathological data here would suggest some re-parameterization of your model.
+
+Let's extract the posterior distribution from the model using the `as_draws` function from the `posterior` package and look at the MCMC diagnotics to assess convergence.
+
+```{r assess-convergence}
+fit2draws <- as_draws(fit2$stanfit)
+summarize_draws(fit2draws, default_convergence_measures())
+```
+
+Here, we need the `rhat` values to all be very close to 1.00. They all looked good when I ran it.
+
+There are 4000 samples in the posterior draw, so for the effective sample size measures, we want high hundreds to thousands here. They all looked fine when I ran it. If you saw low hundreds, you should be concerned.
+
+Ok. So the MCMC sampler seems to have worked well. Now, how does the model fit?
+
+We can look at our usual diagnostics. First, let's plot the residuals against the fitted values.
+
+```{r residuals-vs-fitted}
+plot(resid(fit2) ~ fitted(fit2))
+```
+
+How does that look?
+
+Let's do a QQ plot.
+
+```{r qq-plot}
+qqnorm(resid(fit2)); qqline(resid(fit2))
+```
+
+How does that look?
+
+# Posterior Predictive Distribution
+
+Let's generate the posterior predictive distribution and use it to see how well our model captures the features of the observed data.
+
+```{r generate-ppd}
+fit2ppd <- posterior_predict(fit2)
+```
+
+First, let's see how the samples match the overall observed distribution of tusk length.
+
+```{r density-overlay}
+ppc_dens_overlay(tusksize$loglength, fit2ppd[1:50,])
+```
+
