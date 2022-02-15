@@ -45,7 +45,7 @@ p2 <- ggplot(tusksize, aes(length, height, color = time)) +
 p1 + p2
 ```
 
-That looks fine for linear regression modeling and there is an apparent difference between the sexes and time periods.
+That looks fine for linear regression modeling and there is an apparent difference between the sexes and time periods. However, there does look like there is likely to be some heteroscedasticity.
 
 ## Some data pre-processing
 
@@ -61,7 +61,7 @@ Next, following the lead of the paper, we'll center (but not scale) the height d
 
 ```{r center-logheight}
 tusksize <- tusksize %>% 
-  mutate(logheight = scale(logheight, center = TRUE, scale = FALSE))
+  mutate(logheight = scale(logheight, center = TRUE, scale = FALSE)[,1])
 ```
 
 ## Ordinary linear regression
@@ -87,13 +87,12 @@ CORES = parallel::detectCores() - 1
 SEED = 1234
 ```
 
-Now we can fit a Bayesian regression model. We'll use the `stan_lm` function from `rstanarm` with a `R2` prior. In the function call below, replace `FIX` with a good starting value for the likely R-squared of the model. 
+Now we can fit a Bayesian regression model. We'll use the `stan_lm` function from `rstanarm` with a `R2` prior. In the function call below, replace `REPLACE` with a good starting value for the likely R-squared of the model. 
 
 ```{r rstanarm-regression}
 fit2 <- stan_lm(tuskformula1,
                 data = tusksize,
-                #prior = R2(FIX, what="mean"),
-                prior = R2(0.87, what="mean"),
+                prior = R2(REPLACE, what="mean"),
                 chains = CHAINS, cores = CORES, seed = SEED)
 ```
 
@@ -101,19 +100,17 @@ Hopefully that completed without any divergences on your computer (it did on min
 
 ```{r}
 #
-summary(fit2)
 ```
 
 Here, the intercept is the expected (log) tusk length for a *female* elephant of average height during the *1966-68* time period. What is that expected length?
 
 ```{r}
-#exp(FIX)
-exp(4.5)
+exp(REPLACE)
 ```
 
 But we're getting a little ahead of ourselves here. Let's first check some of the MCMC and model diagnostics.
 
-First, we can get an overview of some of the sampler diagnostics using the `check_hmc_diagnostics` function from `rstan`. 
+First, we can get an overview of some of the sampler diagnostics using the `check_hmc_diagnostics` function from `rstan`. Note that you need to reference the `stanfit` object inside the model object here.
 
 ```{r hmc-diagnostics}
 rstan::check_hmc_diagnostics(fit2$stanfit)
@@ -127,6 +124,8 @@ Finally, the "Energy" is another measure of how efficiently the sampler is worki
 
 Let's extract the posterior distribution from the model using the `as_draws` function from the `posterior` package and look at the MCMC diagnotics to assess convergence.
 
+Again, note that you need to reference the `stanfit` object within the model object. In this case, the necessity for this should go away at some point, but it's here for now.
+
 ```{r assess-convergence}
 fit2draws <- as_draws(fit2$stanfit)
 summarize_draws(fit2draws, default_convergence_measures())
@@ -135,6 +134,18 @@ summarize_draws(fit2draws, default_convergence_measures())
 Here, we need the `rhat` values to all be very close to 1.00. They all looked good when I ran it.
 
 There are 4000 samples in the posterior draw, so for the effective sample size measures, we want high hundreds to thousands here. They all looked fine when I ran it. If you saw low hundreds, you should be concerned.
+
+We can visualize the MCMC posterior distribution using the `mcmc_*` functions from `bayesplot`. For now, let's just look at the posterior distributions and traces for a couple parameters using the `mcmc_combo` function.
+
+```{r mcmc-combo}
+mcmc_combo(fit2draws, pars=c("(Intercept)", "logheight"))
+```
+
+How would you plot the distribution and traces for all the interaction terms?
+
+```{r mcmc-combo-interactions}
+mcmc_combo(fit2draws, pars=REPLACE)
+```
 
 Ok. So the MCMC sampler seems to have worked well. Now, how does the model fit?
 
@@ -166,5 +177,25 @@ First, let's see how the samples match the overall observed distribution of tusk
 
 ```{r density-overlay}
 ppc_dens_overlay(tusksize$loglength, fit2ppd[1:50,])
+```
+
+This isn't terrible, but it's not amazing either. 
+
+We have two difference categorical terms in the model (`sex` and `time`), so let's plot out the posterior predictive distribution for all combinations of those. First, we'll create a new factor with the combined levels and then we'll use `ppc_dens_overlay_grouped` to plot it out.
+
+```{r density-overlay-grouped}
+timebysex <- paste(tusksize$sex, tusksize$time, sep=":")
+ppc_dens_overlay_grouped(tusksize$loglength, fit2ppd[1:50,], timebysex)
+```
+
+Again, none of these are terrible, but they're not spectacular either. I suspect that the data probably need some curation. For instance, in the 2005-13 time period, there are 16 elephants born in 1970 or earlier - so they do not necessarily represent the effects of poaching in the 70s and 80s. In addition, in both time periods there are a lot of immature elephants (> 50% in both), so some of the heterogeneity in the observed data might be a result of this.
+
+# Model estimates
+
+Finally, we can get our coefficient and related parameter estimates from the draws. (This is available in the model summary as well, but the `summarize_draws` function produces a data frame [tibble] that is more flexible.)
+
+```{r}
+summarize_draws(fit2draws, default_summary_measures()) %>% 
+  mutate(across(where(is.numeric), ~round(., 3)))
 ```
 
