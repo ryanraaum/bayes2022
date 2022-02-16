@@ -15,7 +15,6 @@ There's always going to be a `setup` code chunk at the start of the worksheet wh
 
 ```{r setup, message=FALSE}
 library(qmdata) # my example datasets package
-library(here) # robust paths to files included in the project
 library(ggplot2) # plotting
 library(patchwork) # for laying out plots
 theme_set(theme_minimal()) # not necessary, I just don't like the default ggplot theme
