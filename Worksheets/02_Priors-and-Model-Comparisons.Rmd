@@ -67,7 +67,6 @@ Hopefully that completed without any divergences on your computer (it did on min
 
 ```{r summary-fit1}
 #
-summary(fit1)
 ```
 
 You can calculate an analogue of the coefficient of determination $R^2$ using the `bayes_R2` function. This is calculated as "the variance of the predicted values divided by the variance of predicted values plus the expected variance of the errors" ([Gelman et al. 2019](https://doi.org/10.1080/00031305.2018.1549100)). 
@@ -89,13 +88,9 @@ You should see that all the Population-level (`b`; fixed effect) coefficients we
 Set a default `normal(0, 2.5)` prior for all of the Population-level coefficients.
 
 ```{r user-specified-prior}
-# fit2 <- brm(tuskformula1,
-#             data = tusksize,
-#             prior = prior(REPLACE),
-#             chains = CHAINS, cores = CORES, seed = SEED)
 fit2 <- brm(tuskformula1,
             data = tusksize,
-            prior = prior(normal(0, 2.5), class = b),
+            prior = prior(REPLACE),
             chains = CHAINS, cores = CORES, seed = SEED)
 ```
 
@@ -108,17 +103,11 @@ prior_summary(fit2)
 How would you match `rstanarm` and put an exponential prior with a rate parameter of 1 on the residual standard error (`sigma`)?
 
 ```{r exponential-sigma-prior}
-# fit3 <- brm(tuskformula1,
-#             data = tusksize,
-#             prior = c(prior(normal(0, 2.5), class = b),
-#                       prior(exponential(1), class = REPLACE)),
-#             chains = CHAINS, cores = CORES, seed = SEED)
-
 fit3 <- brm(tuskformula1,
-            data = tusksize,
-            prior = c(prior(normal(0, 2.5), class = b),
-                      prior(exponential(1), class = sigma)),
-            chains = CHAINS, cores = CORES, seed = SEED)
+           data = tusksize,
+           prior = c(prior(normal(0, 2.5), class = b),
+                     prior(exponential(1), class = REPLACE)),
+           chains = CHAINS, cores = CORES, seed = SEED)
 ```
 
 ## Model comparisons
@@ -153,15 +142,12 @@ It's probably worth looking to make sure that the PSIS-LOO approximation perform
 
 ```{r view-loo-summary}
 #
-fit3loo
-fit4loo
 ```
 
 Compare the predictive power of the models using the `loo_compare` function.
 
 ```{r loo-compare}
 #
-loo_compare(fit3loo, fit4loo)
 ```
 
 There's not much difference between the models. But this does mean that we can use the model that dropped the interaction term.
