@@ -1,0 +1,182 @@
+---
+title: "Priors and Model Comparisons"
+author: "Ryan Raaum - Spring 2022"
+course: "Introduction to Bayesian Statistics"
+output:
+  rrmdstyle::html_worksheet: default
+  rrmdstyle::pdf_worksheet: default
+---
+
+## Setup 
+
+You'll need to install the `interactions` package for a visualization at the end.
+
+```{r install-interactions}
+if (!require("interactions", quietly = TRUE)) install.packages("interactions")
+```
+
+As always, load up the packages that we need.
+
+```{r setup, message=FALSE}
+library(qmdata) # my example datasets package
+library(ggplot2) # plotting
+library(patchwork) # for laying out plots
+theme_set(theme_minimal()) # not necessary, I just don't like the default ggplot theme
+library(brms) # for Bayesian modeling
+library(loo) # for Bayesian model comparisons
+library(bayesplot) # for plotting of Bayesian models
+library(posterior) # manipulate the posterior distribution
+library(dplyr) # for data wrangling
+```
+
+You'll keep using the elephant tusk size dataset from the first worksheet ([Chiyo et al. 2015](https://doi.org/10.1002/ece3.1769)), and we'll do the same data pre-processing as last time: logging shoulder height and tusk length and centering the height predictor.
+
+```{r data-pre-processing}
+tusksize <- tusksize %>% 
+  mutate(loglength = log(length),
+         logheight = log(height)) %>% 
+  mutate(logheight = scale(logheight, center = TRUE, scale = FALSE)[,1])
+```
+
+## Using `brms`
+
+Last time you ran some Bayesian regressions using the `rstanarm` package. This time we'll use `brms`. Most of the interface is pretty similar and matches the general R modeling interface standards. First let's create the starting formula that we'll be modeling (this is the same as in the last worksheet)
+
+```{r create-formula}
+tuskformula1 <- loglength ~ logheight + sex + time +
+  logheight:sex + logheight:time + sex:time
+```
+
+And - as before - we'll save some common settings for the MCMC sampler. 
+
+```{r sampler-setup}
+CHAINS = 4
+CORES = parallel::detectCores() - 1
+SEED = 1234
+```
+
+Now we can fit a Bayesian regression model. We'll use the `brm` function from `rstanarm` with all default priors. Because `brms` custom-compiles each model, the startup time will be a little longer. Also, this may be where you discover that your system is not fully configured to do this. Let me know if you get an error here so we can trouble-shoot.
+
+```{r brm-regression}
+fit1 <- brm(tuskformula1,
+            data = tusksize,
+            chains = CHAINS, cores = CORES, seed = SEED)
+```
+
+Hopefully that completed without any divergences on your computer (it did on mine). How would you look at a summary of the model?
+
+```{r summary-fit1}
+#
+summary(fit1)
+```
+
+You can calculate an analogue of the coefficient of determination $R^2$ using the `bayes_R2` function. This is calculated as "the variance of the predicted values divided by the variance of predicted values plus the expected variance of the errors" ([Gelman et al. 2019](https://doi.org/10.1080/00031305.2018.1549100)). 
+
+```{r bayes-r2}
+bayes_R2(fit1)
+```
+
+Normally you would definitely want to check your MCMC diagnostics and check your model fit using the standard metrics as well as the posterior predictive density tools, but we'll jump past that to look at the different options for setting priors.
+
+You can see a summary of the priors that were applied for a model with the `prior_summary` function.
+
+```{r prior-summary}
+prior_summary(fit1)
+```
+
+You should see that all the Population-level (`b`; fixed effect) coefficients were given the default flat prior, the intercept was given the default student *t* prior, and the residual standard error (`sigma`) was given the default (half-) student *t* prior.
+
+Set a default `normal(0, 2.5)` prior for all of the Population-level coefficients.
+
+```{r user-specified-prior}
+# fit2 <- brm(tuskformula1,
+#             data = tusksize,
+#             prior = prior(REPLACE),
+#             chains = CHAINS, cores = CORES, seed = SEED)
+fit2 <- brm(tuskformula1,
+            data = tusksize,
+            prior = prior(normal(0, 2.5), class = b),
+            chains = CHAINS, cores = CORES, seed = SEED)
+```
+
+Verify that the priors that you thought that you set were actually set.
+
+```{r verify-priors}
+prior_summary(fit2)
+```
+
+How would you match `rstanarm` and put an exponential prior with a rate parameter of 1 on the residual standard error (`sigma`)?
+
+```{r exponential-sigma-prior}
+# fit3 <- brm(tuskformula1,
+#             data = tusksize,
+#             prior = c(prior(normal(0, 2.5), class = b),
+#                       prior(exponential(1), class = REPLACE)),
+#             chains = CHAINS, cores = CORES, seed = SEED)
+
+fit3 <- brm(tuskformula1,
+            data = tusksize,
+            prior = c(prior(normal(0, 2.5), class = b),
+                      prior(exponential(1), class = sigma)),
+            chains = CHAINS, cores = CORES, seed = SEED)
+```
+
+## Model comparisons
+
+The model formula has all possible interactions included and not all may be necessary. Let's look at the coefficient estimate interval plot from the posterior distribution for the Population-level parameters.
+
+```{r mcmc-intervals}
+mcmc_intervals(fit3, pars=vars(contains("b_")))
+```
+
+Of the interaction terms, it is the `logheight:sex` interaction that looks like it might not be different from zero. So, let's fit a model without that term.
+
+```{r drop-logheight-sex-interaction}
+tuskformula4 <- loglength ~ logheight + sex + time +
+  logheight:time + sex:time
+
+fit4 <- brm(tuskformula4,
+            data = tusksize,
+            prior = c(prior(normal(0, 2.5), class = b),
+                      prior(exponential(1), class = sigma)),
+            chains = CHAINS, cores = CORES, seed = SEED)
+```
+
+Now generate the LOO calculations for the models with and without that interaction term.
+
+```{r generate-loo}
+fit3loo <- loo(fit3, cores = CORES)
+fit4loo <- loo(fit4, cores = CORES)
+```
+
+It's probably worth looking to make sure that the PSIS-LOO approximation performed well. How would you view a summary of that?
+
+```{r view-loo-summary}
+#
+fit3loo
+fit4loo
+```
+
+Compare the predictive power of the models using the `loo_compare` function.
+
+```{r loo-compare}
+#
+loo_compare(fit3loo, fit4loo)
+```
+
+There's not much difference between the models. But this does mean that we can use the model that dropped the interaction term.
+
+## Visualize the model
+
+The `interact_plot` function from the `interactions` package is a convenient way to visualize models that include interactions (and it works with both `rstanarm` and `brms` models).
+
+```{r view-model}
+interact_plot(fit4, pred = logheight, modx = time, interval = TRUE)
+```
+
+You can add the observed data to the plot (which is a plot of the **model**) with the `plot.points` argument.
+
+```{r view-with-observed}
+interact_plot(fit4, pred = logheight, modx = time, interval = TRUE, plot.points = TRUE)
+```
+
