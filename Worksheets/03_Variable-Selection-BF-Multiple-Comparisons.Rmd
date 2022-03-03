@@ -1,0 +1,88 @@
+---
+title: "Varible Selection, Bayes Factors, & Multiple Comparisons"
+author: "Ryan Raaum - Spring 2022"
+course: "Introduction to Bayesian Statistics"
+output:
+  rrmdstyle::html_worksheet: default
+  rrmdstyle::pdf_worksheet: default
+---
+
+## Setup 
+
+You'll need to install some packages and install the github version of `brms`.
+
+```{r setup-new-packages}
+if (packageVersion("brms") == '2.16.3') install.packages("paul-buerkner/brms")
+if (!(require("TH.data"))) install.packages("TH.data")
+```
+
+As always, load up the packages that we need.
+
+```{r setup-packages, message=FALSE}
+library(qmdata) # my example datasets package
+library(TH.data) # for the variable selection dataset
+library(ggplot2) # plotting
+library(patchwork) # for laying out plots
+theme_set(theme_minimal()) # not necessary, I just don't like the default ggplot theme
+library(brms) # for Bayesian modeling
+library(bayesplot) # for plotting of Bayesian models
+library(dplyr) # for data wrangling
+library(posterior)
+```
+
+# Variable Selection
+
+For the variable selection example, you will use a series of measurements from a laser scanning image of the eye for individuals with and without glaucoma. There are 62 potential predictors and one outcome variable (`Class`).
+
+```{r data-pre-processing}
+data("GlaucomaM", package = "TH.data")
+
+# for the logistic regression we're going to do, this factor needs to be
+# numeric. Now "1" will be glaucoma and "0" is no glaucoma
+GlaucomaM <- GlaucomaM %>% 
+  mutate(Class = as.numeric(Class) - 1)
+
+target <- "Class"
+predictors <- names(GlaucomaM)[1:62]
+
+# want to standardize the predictors
+GlaucomaM[,predictors] <- scale(GlaucomaM[,predictors])
+```
+
+We'll build the reference model formula programatically instead of writing it out.
+
+```{r make-forumula}
+formula1 <- formula(paste("Class ~", paste(names(GlaucomaM)[1:62], collapse=" + ")))
+formula1
+```
+
+```{r build-reference-model}
+CHAINS = 4
+CORES = 2
+SEED = 12345
+
+# parameterize horseshoe prior
+p <- ncol(GlaucomaM) - 1 # number of predictors
+n <- nrow(GlaucomaM) # number of observations
+p0 <- 15 # prior guess for the number of relevant variables
+tau0 <- p0/(p-p0) * 1/sqrt(n)
+
+fit1 <- brm(formula1,
+            data = GlaucomaM,
+            family = bernoulli,
+            prior = prior(horseshoe(scale_global = tau0), class=b),
+            control = list(adapt_delta = 0.99), # take this out
+            seed = SEED, chains = CHAINS, cores = CORES)
+```
+
+There might be a divergent transition when you first run the code above. You should fix that.
+
+Once you have a model fit without transitions, we can look at the posterior.
+
+```{r visualize-posterior}
+pd1 <- as_draws_array(fit1)
+mcmc_intervals(pd1[,,2:63], inner_size=1, point_size=1) + 
+  coord_flip() + # easier to fit a lot on the plot flipped
+  guides(x = guide_axis(angle = 90)) # make the labels readable
+```
+
