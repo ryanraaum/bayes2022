@@ -13,7 +13,8 @@ You'll need to install some packages and install the github version of `brms`.
 
 ```{r setup-new-packages}
 if (packageVersion("brms") == '2.16.3') install.packages("paul-buerkner/brms")
-if (!(require("TH.data"))) install.packages("TH.data")
+if (!(require("TH.data", quietly = TRUE))) install.packages("TH.data")
+if (!(require("projpred", quietly = TRUE))) install.packages("projpred")
 ```
 
 As always, load up the packages that we need.
@@ -25,9 +26,11 @@ library(ggplot2) # plotting
 library(patchwork) # for laying out plots
 theme_set(theme_minimal()) # not necessary, I just don't like the default ggplot theme
 library(brms) # for Bayesian modeling
+library(loo) # for model validation
 library(bayesplot) # for plotting of Bayesian models
 library(dplyr) # for data wrangling
-library(posterior)
+library(posterior) # for working with posterior distributions
+library(projpred) # projected prediction variable selection
 ```
 
 # Variable Selection
@@ -85,4 +88,125 @@ mcmc_intervals(pd1[,,2:63], inner_size=1, point_size=1) +
   coord_flip() + # easier to fit a lot on the plot flipped
   guides(x = guide_axis(angle = 90)) # make the labels readable
 ```
+
+
+```{r extract-refmodel}
+refmodel <- get_refmodel(fit1)
+```
+
+This will take a little while to run...
+
+```{r do-variable-selection}
+vs1 <- cv_varsel(fit1)
+```
+
+```{r plot-vs-2}
+plot(vs1, deltas = TRUE)
+```
+
+```{r suggest-size}
+n_selected <- suggest_size(vs1)
+n_selected
+```
+
+```{r variables-selected}
+v_selected <- solution_terms(vs1)[1:n_selected]
+v_selected
+```
+
+```{r project-submodel, fig.height=3}
+projection1 <- project(vs1, nterms=n_selected, ndraws = 1000)
+projpd1 <- as.matrix(projection1)   
+mcmc_areas(projpd1, pars = v_selected)
+```
+
+```{r compare-projection-reference}
+pd1 <- as.matrix(refmodel$fit)
+ref_p <- mcmc_intervals(pd1, pars=paste0("b_", v_selected)) + xlim(-3,3)
+proj_p <- mcmc_intervals(projpd1, pars = v_selected) + xlim(-3,3)
+ref_p / proj_p
+```
+
+```{r refit-selected-vars}
+refit_formula <- formula(paste("Class ~ ", paste(v_selected, collapse=" + ")))
+
+refit <- brm(formula1,
+            data = GlaucomaM,
+            family = bernoulli,
+            prior = prior(normal(0, 0.5), class=b),
+            save_pars = save_pars(all = TRUE),
+            seed = SEED, chains = CHAINS, cores = CORES)
+```
+
+```{r refit-posterior}
+refitpd <- as_draws_array(refit)
+mcmc_areas(refitpd, pars=paste0("b_", v_selected))
+```
+
+```{r refit-loo}
+refitloo <- loo(refit, moment_match = TRUE, save_psis = TRUE)
+```
+
+```{r baseline-model}
+fit0 <- update(refit, formula = Class ~ 1, refresh=0)
+fit0loo <- loo(fit0)
+loo_compare(fit0loo, refitloo)
+```
+
+```{r}
+linpred <- posterior_linpred(refit)
+preds <- posterior_epred(refit)
+pred <- colMeans(preds)
+pr <- as.integer(pred >= 0.5)
+y <- GlaucomaM$Class
+
+# posterior classification accuracy
+round(mean(xor(pr,as.integer(y==0))),2)
+
+# posterior balanced classification accuracy
+round((mean(xor(pr[y==0]>0.5,as.integer(y[y==0])))+mean(xor(pr[y==1]<0.5,as.integer(y[y==1]))))/2,2)
+
+# LOO predictive probabilities
+ploo=E_loo(preds, refitloo$psis_object, type="mean", log_ratios = -log_lik(refit))$value
+# LOO classification accuracy
+round(mean(xor(ploo>0.5,as.integer(y==0))),2)
+
+# LOO balanced classification accuracy
+round((mean(xor(ploo[y==0]>0.5,as.integer(y[y==0])))+mean(xor(ploo[y==1]<0.5,as.integer(y[y==1]))))/2,2)
+
+qplot(pred, ploo)
+```
+
+```{r}
+calPlotData<-calibration(factor(y) ~ pred + loopred, 
+                         data = data.frame(pred=pred,loopred=ploo,y=y), 
+                         cuts=10, class="1")
+ggplot(calPlotData, auto.key = list(columns = 2))+
+  scale_colour_brewer(palette = "Set1")
+```
+
+```{r}
+library(splines)
+library(MASS)
+ggplot(data = data.frame(pred=pred,loopred=ploo,y=y), aes(x=loopred, y=y)) +
+  stat_smooth(method='glm', formula = y ~ ns(x, 5), fullrange=TRUE) +
+  geom_abline(linetype = 'dashed') +
+  labs(x = "Predicted (LOO)", y = "Observed") +
+  geom_jitter(height=0.02, width=0, alpha=0.3) +
+  scale_y_continuous(breaks=seq(0,1,by=0.1)) +
+  xlim(c(0,1))
+```
+
+
+```{r refmodel-dens-overlay}
+refitppd <- posterior_predict(refit)
+#
+#
+y <- GlaucomaM$Class
+ppc_bars(y, refitppd)
+ppc_ecdf_overlay(y, refitppd[1:50,])
+ppc_rootogram(y, refitppd)
+```
+
+See: https://avehtari.github.io/modelselection/diabetes.html
 
