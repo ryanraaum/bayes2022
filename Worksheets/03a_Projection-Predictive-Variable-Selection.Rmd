@@ -75,45 +75,57 @@ fit1 <- brm(formula1,
             seed = SEED, chains = CHAINS, cores = CORES)
 ```
 
-There might be a divergent transition when you first run the code above. If so, you should fix that by changing the `adapt_delta` value. The default value for `adapt_delta` for `brms` is 0.8, which is quite low compared to the `rstanarm` default value of 0.95.
+There might be a divergent transition when you first run the code above. If so, you should fix that by changing the `adapt_delta` value. The default value for `adapt_delta` for `brms` is 0.8, which is quite low compared to the `rstanarm` default value of 0.95. The full argument to add to change the value is `control = list(adapt_delta = <VALUE>)`.
 
-Once you have a model fit without transitions, we can look at the posterior.
+Once you have a model fit without transitions, we can look at the posterior. In the lecture, I did density plots (`mcmc_areas`), but with 62 predictors that gets all scrunched up and very difficult to look at, so here I've done interval plots flipped sideways instead. It's still not the easiest thing to look at, but it's better.
 
 ```{r visualize-posterior}
 pd1 <- as_draws_array(fit1)
-mcmc_intervals(pd1[,,2:63], inner_size=1, point_size=1) + 
+mcmc_intervals(pd1[,,paste0("b_", predictors)], inner_size=1, point_size=1) + 
   coord_flip() + # easier to fit a lot on the plot flipped
   guides(x = guide_axis(angle = 90)) # make the labels readable
 ```
 
+So - while there are a lot of the predictors whose posterior distributions are clumped up around zero, there are a couple that are clearly non-zero and several others that might not be. So, let's do the variable selection. First, we create the reference model object.
 
 ```{r extract-refmodel}
 refmodel <- get_refmodel(fit1)
 ```
 
-This will take a little while to run...
+Now, we can do the varible selection using the `vs_varsel` function. This will take a little while to run...(took about 7 minutes on my nothing-special office desktop).
 
 ```{r do-variable-selection}
 vs1 <- cv_varsel(fit1)
 ```
 
+Now we can visualize the submodel ELPDs relative to the reference model (`deltas = TRUE`).
+
 ```{r plot-vs-2}
 plot(vs1, deltas = TRUE)
 ```
+
+And determine how many variables the procedure deems useful as predictors.
 
 ```{r suggest-size}
 n_selected <- suggest_size(vs1)
 n_selected
 ```
 
+And figure out which ones those are.
+
 ```{r variables-selected}
 v_selected <- solution_terms(vs1)[1:n_selected]
 v_selected
 ```
 
+We can project the posterior distribution of the selected variables.
+
 ```{r project-submodel, fig.height=3}
+# generate the projection for our selected variables
 projection1 <- project(vs1, nterms=n_selected, ndraws = 1000)
+# convert that to something that we can plot with bayesplot
 projpd1 <- as.matrix(projection1)   
+# and visualize
 mcmc_areas(projpd1, pars = v_selected)
 ```
 
