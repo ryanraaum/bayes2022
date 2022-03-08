@@ -1,0 +1,146 @@
+---
+title: "Hierarchical Multiple Comparisons"
+author: "Ryan Raaum - Spring 2022"
+course: "Introduction to Bayesian Statistics"
+output:
+  rrmdstyle::html_worksheet: default
+  rrmdstyle::pdf_worksheet: default
+---
+
+## Setup 
+
+You'll need to install some packages and install the github version of `brms`.
+
+```{r setup-new-packages}
+if (!require("emmeans", quietly = TRUE)) install.packages("emmeans")
+if (!require("bayestestR", quietly = TRUE)) install.packages("bayestestR")
+if (!require("tidybayes", quietly = TRUE)) install.packages("tidybayes")
+```
+
+As always, load up the packages that we need.
+
+```{r setup-packages, message=FALSE}
+library(qmdata) # for the example dataset
+library(ggplot2) # plotting
+library(patchwork) # for laying out plots
+theme_set(theme_minimal()) # not necessary, I just don't like the default ggplot theme
+library(brms) # for Bayesian modeling
+# library(bayesplot) # for plotting of Bayesian models
+library(dplyr) # for data wrangling
+library(emmeans) # for simple pairwise comparisons and multiple testing correction
+library(bayestestR) # for p_direction
+library(tidybayes) # for some posterior manipulations
+library(posterior) # for other posterior manipulations
+# library(posterior) # for working with posterior distributions
+```
+
+## Example Data
+
+The example data are from a set of skeletal indices related to functional outcomes from a study examining sexual selection in carnivores [Morris and Carrier 2016](https://doi.org/10.1111/evo.12904). Here we'll focus on the `skull_shape_index` for the Felidae in the dataset.
+
+```{r subset-and-plot-data}
+felids <- carnivora_indices %>% 
+  filter(family == "Felidae") %>% 
+  tidyr::drop_na(skull_shape_index)
+
+ggplot(felids, aes(species, skull_shape_index)) +
+  geom_boxplot()
+```
+
+## No muliple correction and family-wise error rate correction
+
+We'll fit a regular linear regression model and identify significantly different comparisons without doing any multiple testing correction as well as family-wise error rate correction.
+
+```{r fit-ols-model}
+fit <- lm(skull_shape_index ~ species, data=felids)
+```
+
+How many of the 15 pairwise comparisons among the six species included are significant at the simple p < 0.05 level?
+
+```{r no-correction}
+emmeans(fit, pairwise ~ species, adjust = "none") %>% 
+  purrr::pluck("contrasts") %>% 
+  tibble::as_tibble() %>% 
+  dplyr::filter(p.value < 0.05) %>% 
+  nrow()
+```
+
+Next, how about a simple Bonferroni correction? (Other options include `holm`, `tukey`, and `fdr`; I couldn't track down the documentation, but it appears to be the `p.adjust` options (see `?p.adjust`) with the addition of Tukey's HSD).
+
+```{r no-correction}
+emmeans(fit, pairwise ~ species, adjust = "bonferroni") %>% 
+  purrr::pluck("contrasts") %>% 
+  tibble::as_tibble() %>% 
+  dplyr::filter(p.value < 0.05) %>% 
+  nrow()
+```
+
+## Bayesian Hierarchical Pairwise Comparisons
+
+We'll fit a hierarchical model with `species` as a group-level variable using `brms`.
+
+```{r fit-hierarchical-model}
+CHAINS = 4
+CORES = parallel::detectCores() - 1
+SEED = 12345
+
+# there's only an intercept and a group-level sd here, 
+# which have real priors by default, so will go with those
+hfit <- brm(skull_shape_index ~ (1|species),
+            data = felids,
+            control = list(adapt_delta = 0.9),
+            seed = SEED, chains = CHAINS, cores = CORES)
+```
+
+### Interlude
+
+The `bayestestR` `p_direction` function does not currently handle `rvars` from the `posterior` package cleanly. The following adds a dispatch function that does that. You can just run this to make it available to use in the next section.
+
+```{r p-direction-for-rvars}
+p_direction.rvar <- function(x, method="direct", null=0, ...) {
+  x_draws <- posterior::draws_of(x)
+  n <- nrow(x_draws)
+  pdir <- pmax(
+      matrixStats::colCounts(x_draws > null, value=TRUE)/n, # pd positive
+      matrixStats::colCounts(x_draws < null, value=TRUE)/n # pd negative
+  )
+  attr(pdir, "method") <- method
+  
+  class(pdir) <- unique(c("p_direction", "see_p_direction", class(pdir)))
+  
+  pdir
+}
+```
+
+### Back to the example
+
+Do all the pairwise comparisons for each of the group-level variable levels.
+
+```{r hierarchical-comparisons}
+hcompare <- hfit %>% 
+  spread_rvars(r_species[species,]) %>% 
+  compare_levels(r_species, by=species) %>% 
+  mutate(pd = p_direction(r_species))
+hcompare
+```
+
+How many would be designated as different (probability of direction of >= 97.5%)?
+
+```{r hierarchical-comparison-differences}
+hcompare %>% 
+  filter(pd >= 0.975) %>% 
+  nrow()
+```
+
+Back to the situation in the class example where the multiple comparison correction might be too extreme when there actually are a lot of real differences in the data.
+
+What do the differences look like?
+
+```{r plot-differences}
+hcompare %>% 
+  mutate(different = pd >= 0.975) %>%
+  ggplot(aes(y = species, dist = r_species, color = different)) +
+  stat_dist_halfeye() +
+  geom_vline(xintercept = 0, linetype = "dashed") 
+```
+

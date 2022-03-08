@@ -1,0 +1,30 @@
+---
+title: "Model Comparison with Bayes Factors"
+author: "Ryan Raaum - Spring 2022"
+course: "Introduction to Bayesian Statistics"
+output:
+  rrmdstyle::html_worksheet: default
+  rrmdstyle::pdf_worksheet: default
+---
+
+## Setup 
+
+You'll need to install some packages and install the github version of `brms`.
+
+```{r setup-new-packages}
+if (packageVersion("brms") == '2.16.3') install.packages("paul-buerkner/brms")
+if (!(require("TH.data", quietly = TRUE))) install.packages("TH.data")
+if (!(require("projpred", quietly = TRUE))) install.packages("projpred")
+```
+
+As always, load up the packages that we need.
+
+```{r setup-packages, message=FALSE}
+library(ggplot2) # plotting
+library(patchwork) # for laying out plots
+theme_set(theme_minimal()) # not necessary, I just don't like the default ggplot theme
+library(brms) # for Bayesian modeling
+library(bayesplot) # for plotting of Bayesian models
+library(dplyr) # for data wrangling
+library(posterior) # for working with posterior distributions
+```
