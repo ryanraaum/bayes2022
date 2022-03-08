@@ -22,7 +22,6 @@ As always, load up the packages that we need.
 ```{r setup-packages, message=FALSE}
 library(qmdata) # for the example dataset
 library(ggplot2) # plotting
-library(patchwork) # for laying out plots
 theme_set(theme_minimal()) # not necessary, I just don't like the default ggplot theme
 library(brms) # for Bayesian modeling
 # library(bayesplot) # for plotting of Bayesian models
@@ -31,7 +30,6 @@ library(emmeans) # for simple pairwise comparisons and multiple testing correcti
 library(bayestestR) # for p_direction
 library(tidybayes) # for some posterior manipulations
 library(posterior) # for other posterior manipulations
-# library(posterior) # for working with posterior distributions
 ```
 
 ## Example Data
@@ -104,10 +102,6 @@ p_direction.rvar <- function(x, method="direct", null=0, ...) {
       matrixStats::colCounts(x_draws > null, value=TRUE)/n, # pd positive
       matrixStats::colCounts(x_draws < null, value=TRUE)/n # pd negative
   )
-  attr(pdir, "method") <- method
-  
-  class(pdir) <- unique(c("p_direction", "see_p_direction", class(pdir)))
-  
   pdir
 }
 ```
@@ -137,10 +131,8 @@ Back to the situation in the class example where the multiple comparison correct
 What do the differences look like?
 
 ```{r plot-differences}
-hcompare %>% 
-  mutate(different = pd >= 0.975) %>%
-  ggplot(aes(y = species, dist = r_species, color = different)) +
-  stat_dist_halfeye() +
+ggplot(hcompare, aes(y = reorder(species, pd), dist = r_species)) +
+  stat_halfeye() +
   geom_vline(xintercept = 0, linetype = "dashed") 
 ```
 

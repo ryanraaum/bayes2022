@@ -9,22 +9,105 @@ output:
 
 ## Setup 
 
-You'll need to install some packages and install the github version of `brms`.
+You may need to install some packages.
 
 ```{r setup-new-packages}
-if (packageVersion("brms") == '2.16.3') install.packages("paul-buerkner/brms")
-if (!(require("TH.data", quietly = TRUE))) install.packages("TH.data")
-if (!(require("projpred", quietly = TRUE))) install.packages("projpred")
+if (!(require("bayestestR", quietly = TRUE))) install.packages("bayestestR")
+if (!(require("see", quietly = TRUE))) install.packages("see")
+if (!(require("logspline", quietly = TRUE))) install.packages("logspline")
 ```
 
 As always, load up the packages that we need.
 
 ```{r setup-packages, message=FALSE}
-library(ggplot2) # plotting
-library(patchwork) # for laying out plots
+library(qmdata) # my example datasets package
 theme_set(theme_minimal()) # not necessary, I just don't like the default ggplot theme
 library(brms) # for Bayesian modeling
-library(bayesplot) # for plotting of Bayesian models
 library(dplyr) # for data wrangling
-library(posterior) # for working with posterior distributions
+library(bayestestR) # for bayes factor calculations
 ```
+
+## Setup example data
+
+You'll use the elephant tusk size dataset that you used in earlier worksheets ([Chiyo et al. 2015](https://doi.org/10.1002/ece3.1769)) and we'll do the same data pre-processing as before: logging shoulder height and tusk length and centering the height predictor.
+
+```{r data-pre-processing}
+tusksize <- tusksize %>% 
+  mutate(loglength = log(length),
+         logheight = log(height)) %>% 
+  mutate(logheight = scale(logheight, center = TRUE, scale = FALSE)[,1])
+```
+
+## Create models
+
+For the model comparisons, we'll fit some of the same models that were compared previously using LOO. First set up the model formulae.
+
+```{r model-formulae}
+# one with no interactions
+formula1 <- loglength ~ logheight + sex + time
+
+# one including just the two-way interactions that look like they could be non-zero
+formula2 <- loglength ~ logheight + sex + time +
+  logheight:time + sex:time
+
+# including all two-way interactions
+formula3 <- loglength ~ logheight + sex + time +
+  logheight:sex + logheight:time + sex:time
+```
+
+Now fit the models (we'll also fit an intercept-only model). We'll leave the default intercept prior - because that is a real prior in `brms`, but we'll set the same `normal(0, 2.5)` prior for the Population-level coefficients (instead of the default improper flat prior).
+
+```{r fit-models}
+CHAINS = 4
+CORES = parallel::detectCores() - 1
+SEED = 1234
+
+fit0 <- brm(loglength ~ 1,
+           data = tusksize,
+           save_pars = save_pars(all = TRUE), # needed for BF comparisons
+           chains = CHAINS, cores = CORES, seed = SEED,
+           refresh = 0) # suppress the chain output information
+
+fit1 <- brm(formula1,
+           data = tusksize,
+           prior = prior(normal(0, 2.5), class = b),
+           save_pars = save_pars(all = TRUE), # needed for BF comparisons
+           chains = CHAINS, cores = CORES, seed = SEED,
+           refresh = 0) # suppress the chain output information
+
+# we can reuse all the settings from fit one and just change the formula
+# (data needs to be supplied again because there are new terms in the formula)
+# (and it seems that the refresh setting doesn't carry over)
+fit2 <- update(fit1, formula2, newdata = tusksize, refresh = 0)
+fit3 <- update(fit1, formula3, newdata = tusksize, refresh = 0)
+```
+
+Now calculate Bayes Factors relative to the intercept-only model using the `bayesfactor_models` function from the `bayestestR` package. (This will suggest more samples, but we can ignore that for this example).
+
+```{r first-bf-comparison}
+bayesfactor_models(fit0, fit1, fit2, fit3)
+```
+
+Well, the other models are massively better than the intercept-only model (but we probably already guessed that). Let's compare the models with interactions to the model with only main terms.
+
+```{r second-bf-comparison}
+bf2 <- bayesfactor_models(fit1, fit2, fit3)
+bf2
+```
+
+The model with just the `logheight:time` and `sex:time` interactions is substantially better than the one with all the interactions.
+
+There's a kind-of cutesy plot for the model comparison object.
+
+```{r plot-bf-comparison}
+plot(bf2)
+```
+
+We can also compare the two best fitting models (comparing the better fitting `fit2` against `fit3` to get BF numbers > 1).
+
+```{r compare-best-fitting}
+bf3 <- bayesfactor_models(fit3, fit2)
+bf3
+```
+
+So, by the Bayes Factor guidelines, 27 is a clear advantage of the simpler model over the one with all of the possible two-way interactions.
